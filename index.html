@@ -1396,14 +1396,8 @@
                 const timestamp = new Date().getTime();
                 const url = `https://docs.google.com/spreadsheets/d/e/${PUBLISHED_ID}/pub?gid=${GID}&single=true&output=csv&t=${timestamp}`;
                 
-                const response = await fetch(url, {
-                    cache: 'no-store',
-                    headers: {
-                        'Cache-Control': 'no-cache, no-store, must-revalidate',
-                        'Pragma': 'no-cache',
-                        'Expires': '0'
-                    }
-                });
+                // Simple fetch without custom headers to avoid CORS issues
+                const response = await fetch(url);
                 const text = await response.text();
                 
                 console.log('✅ Raw CSV data received');
