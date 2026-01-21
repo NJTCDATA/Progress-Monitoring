@@ -1392,9 +1392,18 @@
             try {
                 console.log('📊 Fetching from published sheet...');
                 
-                const url = `https://docs.google.com/spreadsheets/d/e/${PUBLISHED_ID}/pub?gid=${GID}&single=true&output=csv`;
+                // Add cache-busting timestamp to force fresh data
+                const timestamp = new Date().getTime();
+                const url = `https://docs.google.com/spreadsheets/d/e/${PUBLISHED_ID}/pub?gid=${GID}&single=true&output=csv&t=${timestamp}`;
                 
-                const response = await fetch(url);
+                const response = await fetch(url, {
+                    cache: 'no-store',
+                    headers: {
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache',
+                        'Expires': '0'
+                    }
+                });
                 const text = await response.text();
                 
                 console.log('✅ Raw CSV data received');
@@ -1440,7 +1449,12 @@
                     }
                 }
                 
-                console.log(`✅ Loaded ${entries.length} entries`);
+                console.log(`✅ Loaded ${entries.length} entries from sheet`);
+                if (entries.length > 0) {
+                    console.log('First entry:', entries[0]);
+                    console.log('Last entry:', entries[entries.length - 1]);
+                    console.log('Sample timestamps:', entries.slice(0, 3).map(e => e.timestamp));
+                }
                 
                 return entries;
                 
@@ -1487,10 +1501,19 @@
         }
 
         function displayTutorHistory(entries, container, pin) {
+            // Sort by timestamp - newest first
+            const sortedEntries = entries.slice().sort((a, b) => {
+                return new Date(b.timestamp) - new Date(a.timestamp);
+            });
+            
+            console.log(`Displaying ${sortedEntries.length} entries for PIN ${pin}`);
+            console.log('Latest entry:', sortedEntries[0]);
+            console.log('Oldest entry:', sortedEntries[sortedEntries.length - 1]);
+            
             const stats = `
                 <div class="stats-header">
                     <h3>📋 Your Session History (PIN: <span class="stat-badge">${pin}</span>)</h3>
-                    <div class="stat-badge">📊 ${entries.length} ${entries.length === 1 ? 'Entry' : 'Entries'} Found</div>
+                    <div class="stat-badge">📊 ${sortedEntries.length} ${sortedEntries.length === 1 ? 'Entry' : 'Entries'} Found</div>
                 </div>
             `;
             
@@ -1500,10 +1523,11 @@
             container.innerHTML = stats + scrollContainer + progressContainer;
             
             const historyScroll = document.getElementById('tutorHistoryScroll');
-            const cards = entries.reverse().map(entry => createEntryCard(entry)).join('');
+            const cards = sortedEntries.map(entry => createEntryCard(entry)).join('');
             historyScroll.innerHTML = cards;
             
-            renderMyProgress(entries, pin);
+            // Pass sorted entries to progress view
+            renderMyProgress(sortedEntries, pin);
         }
 
         function renderMyProgress(allRows, pin) {
@@ -1750,6 +1774,8 @@
             const allEntries = await fetchSheetData();
             const filtered = allEntries.filter(e => e.staffPin === pin && e.staffRole !== 'Instructional Coach Observation');
             
+            console.log(`Found ${filtered.length} entries for PIN: "${pin}"`);
+            
             if (filtered.length > 0) {
                 displayEntries(filtered, resultsDiv, `All Entries for PIN: ${pin}`);
             } else {
@@ -1758,6 +1784,7 @@
                         <span class="empty-icon">🔐</span>
                         <h3>No entries found for PIN: ${pin}</h3>
                         <p>This PIN has no recorded sessions yet</p>
+                        <p style="font-size:0.9rem; margin-top:1rem">Total entries in sheet: ${allEntries.length}</p>
                     </div>
                 `;
             }
@@ -1820,10 +1847,20 @@
             resultsDiv.innerHTML = '<div class="loading"><div class="loading-spinner"></div><br>Loading observations...</div>';
             
             const allEntries = await fetchSheetData();
-            const observations = allEntries.filter(e => 
-                e.staffRole === 'Instructional Coach Observation' && 
-                e.scholarId === sessionId
-            );
+            
+            // More defensive filtering - IC observations can be identified by:
+            // 1. Staff Role = "Instructional Coach Observation" OR
+            // 2. Staff PIN starts with "IC-" OR
+            // 3. Scholar ID matches session ID AND Staff Role contains "Coach" or "Observation"
+            const observations = allEntries.filter(e => {
+                const isICRole = e.staffRole && e.staffRole.includes('Instructional Coach');
+                const isICPin = e.staffPin && e.staffPin.startsWith('IC-');
+                const matchesSession = e.scholarId === sessionId;
+                
+                return matchesSession && (isICRole || isICPin);
+            });
+            
+            console.log(`Found ${observations.length} IC observations for session: ${sessionId}`);
             
             if (observations.length > 0) {
                 displayICObservations(observations, resultsDiv, sessionId);
@@ -1833,16 +1870,24 @@
                         <span class="empty-icon">🎓</span>
                         <h3>No observations found for Session ID: ${sessionId}</h3>
                         <p>This session has no recorded observations yet</p>
+                        <p style="font-size:0.9rem; margin-top:1rem">Total entries checked: ${allEntries.length}</p>
                     </div>
                 `;
             }
         }
 
         function displayICObservations(observations, container, sessionId) {
+            // Sort by timestamp - newest first
+            const sortedObs = observations.slice().sort((a, b) => {
+                return new Date(b.timestamp) - new Date(a.timestamp);
+            });
+            
+            console.log(`Displaying ${sortedObs.length} IC observations for session ${sessionId}`);
+            
             const stats = `
                 <div class="stats-header">
                     <h3>🎓 IC Observations for Session: <span class="stat-badge">${sessionId}</span></h3>
-                    <div class="stat-badge">📊 ${observations.length} ${observations.length === 1 ? 'Observation' : 'Observations'}</div>
+                    <div class="stat-badge">📊 ${sortedObs.length} ${sortedObs.length === 1 ? 'Observation' : 'Observations'}</div>
                 </div>
             `;
             
@@ -1852,10 +1897,11 @@
             container.innerHTML = stats + scrollContainer + analyticsContainer;
             
             const obsScroll = document.getElementById('icObsScroll');
-            const cards = observations.reverse().map(obs => createICObservationCard(obs)).join('');
+            const cards = sortedObs.map(obs => createICObservationCard(obs)).join('');
             obsScroll.innerHTML = cards;
             
-            renderICAnalytics(observations, sessionId);
+            // Pass sorted observations to analytics
+            renderICAnalytics(sortedObs, sessionId);
         }
 
         function createICObservationCard(obs) {
@@ -2051,19 +2097,24 @@
         }
 
         function displayEntries(entries, container, title) {
+            // Sort by timestamp - newest first
+            const sortedEntries = entries.slice().sort((a, b) => {
+                return new Date(b.timestamp) - new Date(a.timestamp);
+            });
+            
             const stats = `
                 <div class="stats-header">
                     <h3>${title}</h3>
-                    <div class="stat-badge">📊 ${entries.length} ${entries.length === 1 ? 'Entry' : 'Entries'} Found</div>
+                    <div class="stat-badge">📊 ${sortedEntries.length} ${sortedEntries.length === 1 ? 'Entry' : 'Entries'} Found</div>
                 </div>
             `;
             
-            const cards = entries.reverse().map(entry => createEntryCard(entry)).join('');
+            const cards = sortedEntries.map(entry => createEntryCard(entry)).join('');
             
             container.innerHTML = stats + '<div style="margin-top:1rem">' + cards + '</div>';
             
             if (title.includes('Your Session History')) {
-                window.currentTutorEntries = entries;
+                window.currentTutorEntries = sortedEntries;
             }
         }
 
